@@ -186,5 +186,7 @@ save(testResults, file = 'testResults.RData')
 testResults
 ```
 
+When the labels of the 20 test cases were revealed, the model predicted all 20 class labels correctly (100% accuracy).
+
 ## Conclusion
 In brief, the overall conclusion of this report is that a random forest classifier can predict correct excercise form vs. incorrect form of different types from intertial human activity data with high estimated accuracy. The classifier was then used to predict the classes of 20 unlabeled test cases.
