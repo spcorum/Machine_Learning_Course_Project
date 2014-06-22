@@ -1,0 +1,190 @@
+---
+title: "Prediction of type of exercise motion using a random forest classifier on intertial measurement data"
+author: "Sean Corum"
+date: "June 18, 2014"
+output: html_document
+---
+
+## Summary
+A random forest classifier was used on inertial data taken during excercise to classify human excercise activity. Data were taken during motion of correctly vs. four kinds of incorrectly performed excercise. The data set comprised 19,622 observations of 152 motional features. The random forest classifier was comprised of 200 trees and was trained in R on 80% of the data and crossvalidated on remaining 20%. The class of the excercise motion was accuratly predicted by the model, with estimated accuracies of 99.34% (bootstrapping) and 99.21% (crossvalidation). The model was then used to predict the classes of 20 unlabeled test cases.
+
+## Study Description
+A study to determine correct vs. improper weight lifting was done (see http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf). In the study, novice weightlifters performed the Unilateral Dumbbell Biceps Curl either correctly (class A) or with improper form simulating one of four common mistakes (classes B, C, D, and E). During exercise, the subjects wore four '9-degrees-of-freedom Razor inertial measurement units' (IMUs), each taking three-axes acceleration, gyroscope and magnetometer measurements at a 45 Hz joint sampling rate. Measurements were combined over 2.5 second windows to give features on the Euler angles (roll, pitch, and yaw) of mean, variance, standard deviation, max, min, amplitude, kurtosis, and skewness. In addtion, raw acceleraometer, gyroscope, and magnetomoter readings were also recorded. From these data, the final training dataset comprised 19,622 observations of 152 features and a single set of class labels (A-E). In addition, unlabeled testing dataset comprised an additional 20 observations.
+
+The goal of the current report is to perform machine learning on the training dataset in R to classify the excercise as correct (A) or incorrect, and if incorrect, which type (B, C, D, and E).
+
+## Obtaining Data
+I obtained the data at the URL below, downloading the data file directly and then reading it into an R dataframe.
+
+```{r, cache = T}
+# data url
+url <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+```
+
+```{r, cache = T, eval = F}
+# download data files
+download.file(url, 'pml-training.csv', method = 'curl')
+```
+
+```{r, cache = T, echo = F}
+# time when data were downloaded
+now <- format(Sys.time(), "%D %H:%m")
+```
+
+```{r, cache = T}
+# read data
+datafull <- read.csv('pml-training.csv') 
+```
+
+The data were obtained on `r now`.
+
+## Data Cleaning
+
+I cleaned the data by removing the first seven columns of metadata, which would be unpredictive in a machine learning algorithm. For future processing, I then coerced all values in the dataframe, less the 'classe' column, to be in numeric format.
+
+```{r, cache = T}
+# first, remove non-predictive metadata
+data <- datafull[ , -1:-7]
+
+# then, coerce all values into numeric format
+l <- dim(data)[2]
+data[,1:(l-1)] <- as.numeric(as.character(unlist(data[,1:(l-1)])))
+```
+
+## Data Partitioning
+Using the R package 'caret', I partitioned the data using random subsamping into an 80% training / 20% cross-validation split.
+
+```{r, cache = T}
+# create training and cross validataion data sets
+library(caret)
+set.seed(69)
+trainIndex <- createDataPartition(y = data$classe, p = 0.8, list = F)
+training <- data[trainIndex, ]
+crossval <- data[-trainIndex, ]
+```
+
+After partitioning, there were `r dim(training)[1]` observations in the training set and `r dim(crossval)[1]` observations in the crossvalidation set, for an empirical split of `r round(dim(training)[1]/dim(data)[1]*100, 2)` % / `r round(dim(crossval)[1]/dim(data)[1]*100, 2)`%.
+
+## Preprocessing
+To preprocess the data, I first removed unpredicitve features that had little or no variance using the nearZeroVar function from the caret package (default settings). Since I planned to use a random forest classifier, little was needed by the way of further data transformation. However, missing values would reduce the performance of the classifier, so I replaced them via k-nearest neighbor imputation (default settings).
+
+```{r, cache = T}
+# first, remove unpredictive data with little or no variance
+nsv <- nearZeroVar(training)
+trainingnsv <- training[, -nsv]
+crossvalnsv <- crossval[, -nsv]
+
+# then, perform knn imputation to remove missing values 
+l <- dim(trainingnsv)[2]
+preObj <- preProcess(trainingnsv[, -l], method = c('knnImpute'))
+trainingProcessed <- predict(preObj, trainingnsv[, -l])
+crossvalProcessed <- predict(preObj, crossvalnsv[, -l])
+```
+
+```{r, cache = T, echo = F}
+# add the classe label to processed data and clean up the column names
+# this step of data cleaning is hidden in the report
+library(plyr)
+trainingProcessed <- cbind(training$classe, trainingProcessed)
+trainingProcessed <- rename(trainingProcessed, c('training$classe' = 'classe'))
+crossvalProcessed <- cbind(crossval$classe, crossvalProcessed)
+crossvalProcessed <- rename(crossvalProcessed, c('crossval$classe' = 'classe'))
+```
+
+## Training a Random Forest Classification Model
+For accuracy, I used a bagging ensemble method -- the random forest -- as a classification model to predict the class from the data. The forest consisted of 200 trees with majority vote prediction and otherwise default settings (caret package method 'rf'). The train function automatically performed bootstrapping of 25 replicate forests to determine the best number of features to sample with replacement at each node. After training, I predicted the class labels on the cross-validation set and saved the prediction for further evaluation.
+
+```{r, eval = F, cache = T}
+# first, train a random forest classifier on the training data
+modFit <- train(y = trainingProcessed$classe, x = trainingProcessed[, -1], 
+                method = 'rf', prox = T, do.trace = T, ntree = 200)
+
+# then, predict classes of the cross validation data using the classifier model
+library(randomForest)
+prediction <- predict(modFit, crossvalProcessed)
+```
+
+```{r, eval = F, echo = F}
+# save time-costly train and predict outputs to file (cache not safe enough here)
+# for exact reproduction, set this eval = F for this code chunk
+save(modFit, file = 'modFit.Rdata')
+save(prediction, file = 'prediction.RData')
+```
+
+```{r, cache = T, echo = F}
+# load modFit and prediction objects from file
+# for exact reproduction, set this eval = F for this code chunk
+load('modFit.RData')
+load('prediction.RData')
+```
+
+The output of the modFit R object is:
+
+```{r, cache = T, eval = T}
+modFit
+```
+
+Here, 'mtry' is the found optimal number of features sampled with replacement at each node.
+
+## Model Evaluation: Bootstrapping
+Inspection of the bootstrapping confusion matrix reveals the details of random forest classifier.
+
+```{r, cache = T, eval = T}
+modFit$finalModel$confusion
+```
+```{r, cache = T, echo = F}
+OOB <- 0.0066
+```
+
+The overall out-of-sample misclassification error from the bootstrapping procedure is `r OOB*100`%, which gives a rather high accuracy of `r (1-OOB)*100`%.
+
+## Model Evaluation: Crossvalidation
+To further assess the out-of-sample misclassification error, I constructed a confusion matrix, as well as the error rate and accuracy, from the crossvalidation predictions with the following R code.
+
+```{r, cache = T}
+# first, assign known classe labels to a 'truth' variable
+truth <- crossval$classe
+
+# then, create a confusion matrix that shows predictions as rows and truth as columns
+confusion <- table(prediction, truth)
+
+# next, compute the accuracy, which are the predictions and truth values that match
+# as a fraction of the total number of values
+accuracy <- sum(diag(confusion))/length(crossvalProcessed$classe)
+
+# finally, compute the misclassification error
+error <- 1 - accuracy
+
+# display the truth table
+confusion
+```
+
+The out-of-sample misclassification error on the crossvalidation set is `r round(error, 4)*100`%, yielding an accuracy of `r round(accuracy, 4)*100`%. Interestingly, this accuracy is `r round(accuracy, 4)*100-98.2`% higher than the original study's reported accuracy of 98.2%, though that study implemented a random forest classifier with different parameters and with a 10-fold cross-validation approach (see again http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf).
+
+## Prediction of Test Cases
+To predict the classes of the 20 unlabeled test cases, the steps of obtaining, cleaning, preprocessing, and predicting as described were re-performed on the test data. The R code for carrying out these steps and displaying the results is:
+
+```{r, cache = T}
+# test data processing pipeline
+url2 <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+download.file(url2, 'pml-testing.csv', method = 'curl')
+testingfull <- read.csv('pml-testing.csv')
+testing <- testingfull[ , -1:-7]
+testing[,1:(l-1)] <- as.numeric(as.character(unlist(testing[,1:(l-1)])))
+testingnsv <- testing[, -nsv]
+testingProcessed <- predict(preObj, testingnsv[, -l])
+testingProcessed <- cbind(testing$problem_id, testingProcessed)
+testingProcessed <- rename(testingProcessed, c('testing$problem_id' = 'Problem_ID'))
+library(randomForest)
+predictionTest <- predict(modFit, testingProcessed)
+testResults <- data.frame(cbind(testingProcessed$Problem_ID, 
+                                as.character(predictionTest)))
+colnames(testResults) <- c('Problem_ID', 'Predicted_Class')
+save(testResults, file = 'testResults.RData')
+
+# display test case prediction results
+testResults
+```
+
+## Conclusion
+In brief, the overall conclusion of this report is that a random forest classifier can predict correct excercise form vs. incorrect form of different types from intertial human activity data with high estimated accuracy. The classifier was then used to predict the classes of 20 unlabeled test cases.
